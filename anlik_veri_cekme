@@ -1,1 +1,337 @@
+#include <WiFi.h>
+#include <FirebaseESP32.h>
+#include <OneWire.h>
+#include <DallasTemperature.h>
 
+#define FIREBASE_HOST "https://mobil-2b41f-default-rtdb.europe-west1.firebasedatabase.app/"
+#define FIREBASE_AUTH "Yxw9bGIf2r8qk0MIhXYXU9VczdJo8jvJ1aYlARW2"
+#define WIFI_SSID "GalaxyA12A0F8"
+#define WIFI_PASSWORD "doeb8360"
+
+int ledPinRed = 12;
+int ledPinGreen = 27;
+int ledPinBlue = 14;
+int ledPinYellow = 26;
+
+
+// Firebase nesneleri
+FirebaseData firebaseData;
+FirebaseConfig config;
+FirebaseAuth auth;
+
+// Sensör pinleri
+const int GSR = 34;
+#define ONE_WIRE_BUS 13
+int sensorPin = 36;
+
+OneWire oneWire(ONE_WIRE_BUS);
+DallasTemperature sensors(&oneWire);
+
+// Kullanıcı bilgileri
+String userID = "";
+String name = "";
+String surname = "";
+int age = 0;
+String gender = "";
+String occupation = "";
+
+void getUserInfo();
+void measureAndStoreSensorAverages(); 
+String readStringInput(String label);
+int readIntInput(String label);
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(ledPinRed, OUTPUT);
+  pinMode(ledPinGreen, OUTPUT);
+  pinMode(ledPinBlue, OUTPUT);
+  pinMode(ledPinYellow, OUTPUT);
+
+
+
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  Serial.print("WiFi'ye bağlanıyor...");
+  while (WiFi.status() != WL_CONNECTED) {
+    Serial.print(".");
+    delay(500);
+  }
+  Serial.println("\nBağlantı başarılı! IP: " + WiFi.localIP().toString());
+
+  config.host = FIREBASE_HOST;
+  config.signer.tokens.legacy_token = FIREBASE_AUTH;
+  Firebase.begin(&config, &auth);
+  Firebase.reconnectWiFi(true);
+
+  sensors.begin();
+
+  while (true) {
+    getUserInfo();
+
+    // Kullanıcı zaten var mı?
+    bool duplicateFound = false;
+    if (Firebase.get(firebaseData, "/users") && firebaseData.dataType() == "json") {
+      FirebaseJson &json = firebaseData.jsonObject();
+      size_t len = json.iteratorBegin();
+      for (size_t i = 0; i < len; i++) {
+        int valueType;
+        String key, value;
+        json.iteratorGet(i, valueType, key, value);
+
+        // Her kullanıcı için geçici veri nesnesi oluştur
+        FirebaseData tempData;
+
+        String existingName = "", existingSurname = "", existingGender = "", existingOccupation = "";
+        int existingAge = 0;
+
+        Firebase.getString(tempData, "/users/" + key + "/Ad");
+        existingName = tempData.stringData();
+
+        Firebase.getString(tempData, "/users/" + key + "/Soyad");
+        existingSurname = tempData.stringData();
+
+        Firebase.getString(tempData, "/users/" + key + "/Cinsiyet");
+        existingGender = tempData.stringData();
+
+        Firebase.getString(tempData, "/users/" + key + "/Meslek");
+        existingOccupation = tempData.stringData();
+
+        Firebase.getInt(tempData, "/users/" + key + "/Yas");
+        existingAge = tempData.intData();
+
+        if (existingName == name &&
+            existingSurname == surname &&
+            existingGender == gender &&
+            existingOccupation == occupation &&
+            existingAge == age) {
+          duplicateFound = true;
+          break;
+        }
+      }
+      json.iteratorEnd();
+    }
+
+    if (duplicateFound) {
+      Serial.println("\n⚠ Bu ad ve soyad zaten kayıtlı. Kayıt yapılmadı.");
+      while (true) {
+        String answer = readStringInput("Başka bir kullanıcı girmek istiyor musunuz? (evet/hayır)");
+        answer.toLowerCase();
+        if (answer == "evet") {
+          break; // tekrar kullanıcı girilecek
+        } else if (answer == "hayir") {
+          Serial.println("Program sonlandırılıyor...");
+          while (true);
+        } else {
+          Serial.println("\nLütfen sadece 'evet' veya 'hayır' yazınız.");
+        }
+      }
+      continue; // başa dön
+    }
+
+    // Sıradaki boş user_ID'yi bul
+    int i = 1;
+    while (true) {
+      String potentialID = "user_" + String(i);
+      if (!Firebase.get(firebaseData, "/users/" + potentialID)) {
+        userID = potentialID;
+        break;
+      }
+      i++;
+    }
+
+    // Firebase'e kullanıcı bilgilerini gönder
+    if (Firebase.setString(firebaseData, "/users/" + userID + "/Ad", name)) {
+      Serial.println("\nAd başarıyla kaydedildi.");
+    } else {
+      Serial.println("Hata: " + firebaseData.errorReason());
+    }
+    
+    if (Firebase.setString(firebaseData, "/users/" + userID + "/Soyad", surname)) {
+      Serial.println("Soyad başarıyla kaydedildi.");
+    } else {
+      Serial.println("Hata: " + firebaseData.errorReason());
+    }
+
+    if (Firebase.setInt(firebaseData, "/users/" + userID + "/Yas", age)) {
+      Serial.println("Yaş başarıyla kaydedildi.");
+    } else {
+      Serial.println("Hata: " + firebaseData.errorReason());
+    }
+
+    if (Firebase.setString(firebaseData, "/users/" + userID + "/Cinsiyet", gender)) {
+      Serial.println("Cinsiyet başarıyla kaydedildi.");
+    } else {
+      Serial.println("Hata: " + firebaseData.errorReason());
+    }
+
+    if (Firebase.setString(firebaseData, "/users/" + userID + "/Meslek", occupation)) {
+      Serial.println("Meslek başarıyla kaydedildi.");
+    } else {
+      Serial.println("Hata: " + firebaseData.errorReason());
+    }
+
+    measureAndStoreSensorAverages();
+
+    while (true) {
+      String again = readStringInput("\nYeni kullanıcı eklemek istiyor musunuz? (evet/hayır)");
+      again.toLowerCase();
+      if (again == "evet") {
+        Serial.println("\n=== Yeni Kullanici ===");
+        break; // döngü başa
+      } else if (again == "hayir") {
+        Serial.println("Program sonlandırılıyor...");
+        while (true);
+      } else {
+        Serial.println("\nLütfen sadece 'evet' veya 'hayır' yazınız.");
+      }
+    }
+  }
+}
+
+void loop() {
+  // Boş bırakılabilir çünkü setup fonksiyonu içinde sürekli çalışıyor
+}
+
+// 1 dakikalık ortalama ölçüm ve firebase'e kayıt
+void measureAndStoreSensorAverages() {
+  unsigned long startMillis = millis();
+  const unsigned long measureDuration = 60000;
+
+  long gsrSum = 0, piezoSum = 0, tempSum = 0;
+  int gsrCount = 0, piezoCount = 0, tempCount = 0;
+
+  while (millis() - startMillis < measureDuration) {
+    int gsrVal = analogRead(GSR);
+    gsrSum += gsrVal;
+    gsrCount++;
+
+    int piezoVal = analogRead(sensorPin);
+    piezoSum += piezoVal;
+    piezoCount++;
+
+    sensors.requestTemperatures();
+    float temp = sensors.getTempCByIndex(0);
+    tempSum += temp;
+    tempCount++;
+  }
+
+  int gsrAvg = gsrSum / gsrCount;
+  int piezoAvg = piezoSum / piezoCount;
+  float tempAvg = (tempSum / (float)tempCount) + 14;
+
+  if (Firebase.setInt(firebaseData, "/users/" + userID + "/GSR_Ortalama", gsrAvg)) {
+    Serial.println("GSR ortalaması başarıyla kaydedildi.");
+  } else {
+    Serial.println("Hata: " + firebaseData.errorReason());
+  }
+
+  if (Firebase.setInt(firebaseData, "/users/" + userID + "/Piezo_Ortalama", piezoAvg)) {
+    Serial.println("Piezo ortalaması başarıyla kaydedildi.");
+  } else {
+    Serial.println("Hata: " + firebaseData.errorReason());
+  }
+
+  if (Firebase.setFloat(firebaseData, "/users/" + userID + "/Sicaklik_Ortalama", tempAvg)) {
+    Serial.println("Sıcaklık ortalaması başarıyla kaydedildi.");
+  } else {
+    Serial.println("Hata: " + firebaseData.errorReason());
+  }
+
+  Serial.println("=== Ortalama Değerler ===");
+  Serial.println("GSR Ort: " + String(gsrAvg));
+  Serial.println("Piezo Ort: " + String(piezoAvg));
+  Serial.println("Sıcaklık Ort: " + String(tempAvg));
+
+  // LED koşulları
+digitalWrite(ledPinRed, piezoAvg > 500 ? HIGH : LOW);
+digitalWrite(ledPinGreen, gsrAvg < 600 ? HIGH : LOW);
+if (tempAvg >= 38 || tempAvg < 35) {
+  digitalWrite(ledPinBlue, HIGH);
+} else {
+  digitalWrite(ledPinBlue, LOW);
+}
+
+
+
+// Nabız ve SpO2 manuel giriş
+int pulse = readIntInput("Nabız (BPM)");
+int spo2 = readIntInput("SpO2 (%)");
+
+if (Firebase.setInt(firebaseData, "/users/" + userID + "/Nabiz", pulse)) {
+  Serial.println("Nabız başarıyla kaydedildi.");
+} else {
+  Serial.println("Hata: " + firebaseData.errorReason());
+}
+
+if (Firebase.setInt(firebaseData, "/users/" + userID + "/SpO2", spo2)) {
+  Serial.println("SpO2 başarıyla kaydedildi.");
+} else {
+  Serial.println("Hata: " + firebaseData.errorReason());
+}
+
+if ( pulse > 100 || pulse < 60) {
+  digitalWrite(ledPinYellow, HIGH);
+} else {
+  digitalWrite(ledPinYellow, LOW);
+}
+
+}
+
+// Kullanıcı bilgilerini al
+void getUserInfo() {
+  Serial.println("\nKullanıcı bilgilerini girin:");
+
+  name = readStringInput("Ad");
+  surname = readStringInput("Soyad");
+  age = readIntInput("Yaş");
+  gender = readStringInput("Cinsiyet");
+  occupation = readStringInput("Meslek");
+
+  if (name == "" || surname == "" || gender == "" || occupation == "" || age <= 0) {
+    Serial.println("⚠ Hatalı giriş. Lütfen bilgileri doğru ve eksiksiz girin.");
+    getUserInfo(); // tekrar çağır
+  }
+}
+
+// String giriş alma
+String readStringInput(String label) {
+  String input = "";
+  Serial.print(label + ": ");
+  while (true) {
+    if (Serial.available()) {
+      input = Serial.readStringUntil('\n');
+      input.trim();
+      bool valid = true;
+
+      for (int i = 0; i < input.length(); i++) {
+        if (!isAlpha(input[i]) && input[i] != ' ') {
+          valid = false;
+          break;
+        }
+      }
+
+      if (valid && input.length() > 0) {
+        return input;
+      } else {
+        Serial.print("⚠ Geçersiz giriş. Lütfen sadece harf kullanın.\n" + label + ": ");
+      }
+    }
+  }
+}
+
+int readIntInput(String label) {
+  String input = "";
+  int value = 0;
+  Serial.print(label + ": ");
+  while (true) {
+    if (Serial.available()) {
+      input = Serial.readStringUntil('\n');
+      input.trim();
+      if (input.length() > 0 && input.toInt() > 0) {
+        value = input.toInt();
+        return value;
+      } else {
+        Serial.print("⚠ Geçersiz sayı. Lütfen pozitif bir sayı girin.\n" + label + ": ");
+      }
+    }
+  }
+}
