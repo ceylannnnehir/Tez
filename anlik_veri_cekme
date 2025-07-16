@@ -3,10 +3,10 @@
 #include <OneWire.h>
 #include <DallasTemperature.h>
 
-#define FIREBASE_HOST "https://mobil-2b41f-default-rtdb.europe-west1.firebasedatabase.app/"
-#define FIREBASE_AUTH "Yxw9bGIf2r8qk0MIhXYXU9VczdJo8jvJ1aYlARW2"
-#define WIFI_SSID "GalaxyA12A0F8"
-#define WIFI_PASSWORD "doeb8360"
+#define FIREBASE_HOST "****"
+#define FIREBASE_AUTH "****"
+#define WIFI_SSID "****"
+#define WIFI_PASSWORD "******"
 
 int ledPinRed = 12;
 int ledPinGreen = 27;
