@@ -1,0 +1,26 @@
+{
+  "expo": {
+      "name": "sensordata-app",
+      "slug": "sensordata-app",
+      "version": "1.0.0",
+      "orientation": "portrait",
+      "icon": "./assets/images/icon.png",
+      "scheme": "sensordataapp",
+      "ios": {
+        "supportsTablet": true
+      },
+      "android": {
+        "adaptiveIcon": {
+          "foregroundImage": "./assets/images/adaptive-icon.png",
+          "backgroundColor": "#ffffff"
+        }
+      },
+    "web": {
+      "bundler": "metro",
+      "output": "web",
+      "favicon": "./assets/images/favicon.png"
+    }
+    
+    
+  }
+}
